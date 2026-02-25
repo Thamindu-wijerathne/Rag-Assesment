@@ -71,3 +71,5 @@ out/
 *.swp
 *.swo
 .pdf
+
+backend/chroma_db/

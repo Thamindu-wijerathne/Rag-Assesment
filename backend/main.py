@@ -12,6 +12,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
+from langchain_chroma import Chroma
 
 from helper import _post_callback, _safe_json_extract
 from llm_calls import generate_answer_from_context, guardrail_classify
@@ -20,6 +21,9 @@ from llm_calls import generate_answer_from_context, guardrail_classify
 app = FastAPI(title="RAG Agent API - Phase 1")
 
 groq_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
+
+PERSIST_DIR = "./chroma_db"  
+os.makedirs(PERSIST_DIR, exist_ok=True)
 
 @app.get("/")
 async def health():
@@ -92,10 +96,16 @@ async def _run_rag_and_callback(job_id: str, document_id: str, question: str, ca
         if document_id not in DOC_STORE:
             raise ValueError("Unknown document_id. Upload first.")
 
-        vs: FAISS = DOC_STORE[document_id]["vectorstore"]
+        info = DOC_STORE[document_id]
 
+        vs = Chroma(
+            collection_name=info["collection_name"],
+            embedding_function=get_embeddings(),
+            persist_directory=info["persist_directory"],
+        )
+        
         # Retrieve information from vectore database
-        docs = vs.similarity_search(question, k=top_k)
+        docs = vs.similarity_search(sanitized_q, k=top_k)
         context = "\n\n".join(
             f"[source: {d.metadata.get('source', 'pdf')} page={d.metadata.get('page', '?')}]\n{d.page_content}"
             for d in docs
@@ -159,19 +169,20 @@ async def upload(file: UploadFile = File(...)):
 
         chunks = _split_docs(docs)
 
-        # Build FAISS index in-memory
-        vs = FAISS.from_documents(chunks, embedding=get_embeddings())
+        # --- Chroma persistent vector store (per doc_id collection) ---
+        vs = Chroma(
+            collection_name=doc_id,
+            embedding_function=get_embeddings(),
+            persist_directory=PERSIST_DIR,
+        )
+        vs.add_documents(chunks)
 
+    # Store only metadata (NOT the vectorstore object) so multi-worker works
     DOC_STORE[doc_id] = {
-        "vectorstore": vs,
-        "meta": {"filename": file.filename, "chunks": len(vs.index_to_docstore_id)},
+        "persist_directory": PERSIST_DIR,
+        "collection_name": doc_id,
+        "meta": {"filename": path, "chunks": len(chunks)},
     }
-
-    print("ntotal:", vs.index.ntotal)
-    print("dimension:", vs.index.d)
-    ids = list(vs.index_to_docstore_id.values())
-    print("first 5 ids:", ids[:5])
-
 
     pages_loaded = len(docs)
     return UploadResponse(document_id=doc_id, pages_loaded=pages_loaded)
