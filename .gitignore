@@ -1,0 +1,73 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.cache/
+
+# ===== Virtual envs / Conda =====
+.venv/
+venv/
+env/
+ENV/
+condaenv/
+*.conda
+# (Optional) local conda config
+.condarc
+
+# ===== Logs =====
+*.log
+logs/
+*.pid
+
+# ===== FastAPI / Uvicorn =====
+*.sqlite3
+*.db
+instance/
+*.pem
+*.key
+*.crt
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== IDEs =====
+.vscode/
+.idea/
+*.iml
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+
+# ===== dotenv (secrets) =====
+.env
+.env.*
+!.env.example
+
+# ===== Node (if you have a frontend) =====
+node_modules/
+.next/
+out/
+
+# ===== Misc =====
+*.tmp
+*.swp
+*.swo
+.pdf
