@@ -15,7 +15,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 
-from helper import _safe_json_extract
+from helper import _safe_json_extract, _post_callback
 
 
 
@@ -57,8 +57,9 @@ def _split_docs(docs):
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     return splitter.split_documents(docs)
 
+# Before input the message into system we check
 async def guardrail_classify(quection):
-    # LLM prompt
+
     system = """
         You are a guardrail router for an AI assistant.
 
@@ -103,14 +104,35 @@ async def guardrail_classify(quection):
     return _safe_json_extract(text)
 
 
-async def _post_callback(callback_url: str, payload: dict) -> None:
-    async with httpx.AsyncClient(timeout=30) as client:
-        await client.post(callback_url, json=payload)
-
-
 async def _run_rag_and_callback(job_id: str, document_id: str, question: str, callback_url: str, top_k: int):
     print("_run_rag_and_callback", job_id, document_id, question, callback_url, top_k)
     try:
+        # checking is it valid quection
+        guard = await guardrail_classify(question) 
+
+        if guard["status"] == "INVALID":
+            payload= {
+                "job_id": job_id,
+                "document_id": document_id,
+                "question": question,
+                "answer": "Invalid",
+                "status": "Invalid request",
+                }
+            await _post_callback(str(callback_url), payload)
+
+        if guard["status"] == "GREETING":
+            payload= {
+                "job_id": job_id,
+                "document_id": document_id,
+                "question": question,
+                "answer": guard["reply"],
+                "status": "Greeting",
+                }
+            await _post_callback(str(callback_url), payload)
+
+        sanitized_q = guard.get("sanitized_request") or question
+        print("sanitized_q :", sanitized_q)
+
         if document_id not in DOC_STORE:
             raise ValueError("Unknown document_id. Upload first.")
 
@@ -223,29 +245,29 @@ async def query(req: QueryRequest, background_tasks: BackgroundTasks):
     
     job_id = str(uuid.uuid4())
 
-    guard = await guardrail_classify(req.question) 
+    # guard = await guardrail_classify(req.question) 
 
-    if guard["status"] == "INVALID":
-        raise HTTPException(status_code=400, detail=guard["reply"])
+    # if guard["status"] == "INVALID":
+    #     raise HTTPException(status_code=400, detail=guard["reply"])
 
-    if guard["status"] == "GREETING":
-            background_tasks.add_task(
-                _post_callback, 
-                str(req.callback_url),
-                {
-                    "job_id": job_id,
-                    "document_id": req.document_id,
-                    "question": req.question,
-                    "answer": guard["reply"],
-                    "sources": [],
-                    "status": "completed",
-                    "type": "greeting",
-                }
-            )
-            return AckResponse(status="accepted", job_id=job_id)
+    # if guard["status"] == "GREETING":
+    #         background_tasks.add_task(
+    #             _post_callback, 
+    #             str(req.callback_url),
+    #             {
+    #                 "job_id": job_id,
+    #                 "document_id": req.document_id,
+    #                 "question": req.question,
+    #                 "answer": guard["reply"],
+    #                 "sources": [],
+    #                 "status": "completed",
+    #                 "type": "greeting",
+    #             }
+    #         )
+    #         return AckResponse(status="accepted", job_id=job_id)
     
-    sanitized_q = guard.get("sanitized_request") or req.question
-    print("sanitized_q :", sanitized_q)
+    # sanitized_q = guard.get("sanitized_request") or req.question
+    # print("sanitized_q :", sanitized_q)
 
 
     # Immediate ACK, do work in background
@@ -253,7 +275,7 @@ async def query(req: QueryRequest, background_tasks: BackgroundTasks):
         _run_rag_and_callback,
         job_id,
         req.document_id,
-        sanitized_q,
+        req.question,
         str(req.callback_url),
         req.top_k,
     )
